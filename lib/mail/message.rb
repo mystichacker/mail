@@ -450,6 +450,12 @@ module Mail
       header.errors
     end
 
+    # Returns a message sha that can be used to identify a message
+    #
+    def sha
+      Digest::SHA2.hexdigest "#{raw_source ? raw_source.length : ''}#{date}#{message_id}"
+    end
+
     # Returns the Bcc value of the mail object as an array of strings of
     # address specs.
     #

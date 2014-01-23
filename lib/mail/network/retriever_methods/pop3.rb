@@ -44,7 +44,25 @@ module Mail
     end
     
     attr_accessor :settings
-    
+
+    # Find folders in a Pop3 mailbox. Without any options, the 10 last folders are returned.
+    #
+    # Possible options:
+    #   mailbox: mailbox to search the folders(s) in. The default is 'INBOX'.
+    #   what:    last or first emails. The default is :first.
+    #   order:   order of emails returned. Possible values are :asc or :desc. Default value is :asc.
+    #   count:   number of emails to retrieve. The default value is 10. A value of 1 returns an
+    #            instance of Message, not an array of Message instances.
+    #   subscribed: flag for whether to find subscribed folders only. Default is false
+    #
+    def find_folders(options={}, &block)
+      if block_given?
+        yield nil
+      else
+        nil
+      end
+    end
+
     # Find emails in a POP3 mailbox. Without any options, the 5 last received emails are returned.
     #
     # Possible options:
@@ -87,8 +105,8 @@ module Mail
         
       end
     end
-    
-    # Delete all emails from a POP3 server   
+
+    # Delete all emails from a POP3 server
     def delete_all
       start do |pop3|
         unless pop3.mails.empty?

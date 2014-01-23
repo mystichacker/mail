@@ -16,6 +16,10 @@ module Mail
       @@emails = []
     end
 
+    def find_folders(options={}, &block)
+      nil
+    end
+
     def find(options = {}, &block)
       options[:count] ||= :all
       options[:order] ||= :asc

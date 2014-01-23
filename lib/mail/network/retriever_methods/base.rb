@@ -4,6 +4,20 @@ module Mail
 
   class Retriever
 
+    # Get mailbox folders.
+    #
+    # Possible options:
+    #   order: order of folders returned. Possible values are :asc or :desc. Default value is :asc.
+    #   count: number of folders to retrieve. The default value is 10. A value of 1 returns a
+    #          instance of Folder, not an array of Folder instances.
+    #
+    def folders(options = {}, &block)
+      options ||= {}
+      options[:what] = :first
+      options[:count] = :all
+      find_folders(options, &block)
+    end
+
     # Get the oldest received email(s)
     #
     # Possible options:
@@ -56,7 +70,8 @@ module Mail
       options ||= {}
       options[:delete_after_find] ||= true
       find(options, &block)      
-    end 
+    end
+
 
   end
 

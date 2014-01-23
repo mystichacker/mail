@@ -49,6 +49,55 @@ module Mail
 
     attr_accessor :settings
 
+    # Find folders in a IMAP mailbox. Without any options, the 10 last folders are returned.
+    #
+    # Possible options:
+    #   mailbox: mailbox to search the folders(s) in. The default is 'INBOX'.
+    #   what:    last or first emails. The default is :first.
+    #   order:   order of emails returned. Possible values are :asc or :desc. Default value is :asc.
+    #   count:   number of emails to retrieve. The default value is 10. A value of 1 returns an
+    #            instance of Message, not an array of Message instances.
+    #   subscribed: flag for whether to find subscribed folders only. Default is false
+    #
+    def find_folders(options={}, &block)
+      options[:mailbox] ||= ''
+      options = validate_options(options)
+      mailbox = options[:mailbox] || ''
+      mailbox = Net::IMAP.encode_utf7(mailbox)
+      mailbox = mailbox.empty? ? '*' : "#{mailbox}/*"
+
+      start do |imap|
+
+        boxes = options[:subscribed] ? imap.lsub('', mailbox) : imap.list('', mailbox)
+        boxes.reverse! if options[:what].to_sym == :last
+        boxes = boxes.first(options[:count]) if options[:count].is_a?(Integer)
+        boxes.reverse! if (options[:what].to_sym == :last && options[:order].to_sym == :asc) ||
+            (options[:what].to_sym != :last && options[:order].to_sym == :desc)
+
+        if block_given?
+          boxes.each do |box|
+            name = Net::IMAP.decode_utf7(box.name)
+            next if name =~ /^\[Gmail\]\/*/
+            name = 'INBOX' if name.downcase == 'inbox'
+            flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
+            status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
+            yield Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
+          end unless boxes.nil?
+        else
+          folders = []
+          boxes.each do |box|
+            name = Net::IMAP.decode_utf7(box.name)
+            next if name =~ /^\[Gmail\]\/*/
+            name = 'INBOX' if name.downcase == 'inbox'
+            flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
+            status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
+            folders << Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
+          end unless boxes.nil?
+          folders.size == 1 && options[:count] == 1 ? folders.first : folders
+        end
+      end
+    end
+
     # Find emails in a IMAP mailbox. Without any options, the 10 last received emails are returned.
     #
     # Possible options:
@@ -140,6 +189,7 @@ module Mail
         options[:delete_after_find] ||= false
         options[:mailbox] = Net::IMAP.encode_utf7(options[:mailbox])
         options[:read_only] ||= false
+        options[:subscribed] ||= false
 
         options
       end
