@@ -141,7 +141,19 @@ module Mail
     mail
   end
 
-  # Find emails from the default retriever
+  # Find folders from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.folders(*args, &block)
+    retriever_method.folders(*args, &block)
+  end
+
+  # Find folders from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_folders(*args, &block)
+    retriever_method.find_folders(*args, &block)
+  end
+
+# Find emails from the default retriever
   # See Mail::Retriever for a complete documentation.
   def self.find(*args, &block)
     retriever_method.find(*args, &block)
@@ -171,7 +183,7 @@ module Mail
     retriever_method.all(*args, &block)
   end
 
-  # Reads in an email message from a path and instantiates it as a new Mail::Message
+# Reads in an email message from a path and instantiates it as a new Mail::Message
   def self.read(filename)
     self.new(File.open(filename, 'rb') { |f| f.read })
   end
