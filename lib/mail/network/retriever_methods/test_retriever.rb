@@ -42,6 +42,25 @@ module Mail
       emails.size == 1 && options[:count] == 1 ? emails.first : emails
     end
 
+    def find_in_batches(options={}, &block)
+      batch_size = options.delete(:batch_size) || 100
+      emails_index = (0...@@emails.size).to_a
+      emails_index.each { |idx| @@emails[idx].mark_for_delete = true } if options[:delete_after_find]
+      emails = emails_index.map { |idx| @@emails[idx] }
+      if block_given?
+        emails.each_slice(batch_size) do |batch|
+          yield batch
+        end
+      end
+      @@emails.reject!(&:is_marked_for_delete?) if options[:delete_after_find]
+    end
+
+    def find_each(options = {})
+      find_in_batches(options) do |messages|
+        messages.each { |messages| yield messages }
+      end
+    end
+
   end
 
 end

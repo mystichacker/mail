@@ -70,7 +70,7 @@ module Mail
     #   order: order of emails returned. Possible values are :asc or :desc. Default value is :asc.
     #   count: number of emails to retrieve. The default value is 10. A value of 1 returns an
     #          instance of Message, not an array of Message instances.
-    #   delete_after_find: flag for whether to delete each retreived email after find. Default
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
     #           is false. Use #find_and_delete if you would like this to default to true.
     #
     def find(options = {}, &block)
@@ -103,6 +103,47 @@ module Mail
           emails.size == 1 && options[:count] == 1 ? emails.first : emails
         end
         
+      end
+    end
+
+    # Find batches of emails in a POP3 mailbox. Without any options, all emails are returned in batches of 100.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
+    #           is false. Use #find_and_delete if you would like this to default to true.
+    #
+    def find_in_batches(options={}, &block)
+      options = validate_options(options)
+      batch_size = options.delete(:batch_size) || 100
+
+      start do |pop3|
+        mails = pop3.mails
+        pop3.reset # Clears all "deleted" marks. This prevents non-explicit/accidental deletions due to server settings.
+
+        if block_given?
+          mails.each_slice(batch_size) do |batch|
+            emails = []
+            batch.each do |mail|
+              emails << Mail.new(mail.pop)
+              mail.delete if options[:delete_after_find]
+            end
+            yield emails
+          end
+        end
+      end
+    end
+
+    # Find each email in a POP3 mailbox using find_in_batches. Without any options,  emails are found in batches of 100.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
+    #           is false. Use #find_and_delete if you would like this to default to true.
+    #
+    def find_each(options = {})
+      find_in_batches(options) do |messages|
+        messages.each { |messages| yield messages }
       end
     end
 

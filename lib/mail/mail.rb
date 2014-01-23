@@ -153,10 +153,22 @@ module Mail
     retriever_method.find_folders(*args, &block)
   end
 
-# Find emails from the default retriever
+  # Find emails from the default retriever
   # See Mail::Retriever for a complete documentation.
   def self.find(*args, &block)
     retriever_method.find(*args, &block)
+  end
+
+  # Find batches of emails from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_in_batches(*args, &block)
+    retriever_method.find_in_batches(*args, &block)
+  end
+
+  # Find each email using find_in_batches from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_each(*args, &block)
+    retriever_method.find_each(*args, &block)
   end
 
   # Finds and then deletes retrieved emails from the default retriever
