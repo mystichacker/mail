@@ -183,7 +183,13 @@ module Mail
     retriever_method.find_each_entry(*args, &block)
   end
 
-  # Finds and then deletes retrieved emails from the default retriever
+  # Find email entries from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_entries(*args, &block)
+    retriever_method.find_entries(*args, &block)
+  end
+
+# Finds and then deletes retrieved emails from the default retriever
   # See Mail::Retriever for a complete documentation.
   def self.find_and_delete(*args, &block)
     retriever_method.find_and_delete(*args, &block)

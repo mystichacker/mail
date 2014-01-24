@@ -162,7 +162,6 @@ module Mail
     #
     # Possible options:
     #   mailbox: mailbox to search the email(s) in. The default is 'INBOX'.
-    #   batch_size: size of batches returned
     #   read_only: will ensure that no writes are made to the inbox during the session.  Specifically, if this is
     #              set to true, the code will use the EXAMINE command to retrieve the mail.  If set to false, which
     #              is the default, a SELECT command will be used to retrieve the mail
@@ -172,6 +171,7 @@ module Mail
     #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
     #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
     #           The default is 'ALL'
+    #   batch_size: size of batches returned
     #
     def find_in_batches(options={}, &block)
       options = validate_options(options)
@@ -201,7 +201,6 @@ module Mail
     #
     # Possible options:
     #   mailbox: mailbox to search the email(s) in. The default is 'INBOX'.
-    #   batch_size: size of batches returned
     #   read_only: will ensure that no writes are made to the inbox during the session.  Specifically, if this is
     #              set to true, the code will use the EXAMINE command to retrieve the mail.  If set to false, which
     #              is the default, a SELECT command will be used to retrieve the mail
@@ -211,6 +210,7 @@ module Mail
     #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
     #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
     #           The default is 'ALL'
+    #   batch_size: size of batches returned
     #
     def find_each(options = {})
       find_in_batches(options) do |messages|
@@ -221,16 +221,23 @@ module Mail
     # Find batches of email entries in a mailbox.
     #
     # Possible options:
+    #   mailbox: mailbox to search the email(s) in. The default is 'INBOX'.
+    #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
+    #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
+    #           The default is 'ALL'
+    #   uids:   uid search criteria that is merged with keys and passed to the SEARCH command.  Can be given as a range, array
+    #           or string.
     #   batch_size: size of batches returned
     #
     def find_entries_in_batches(options={}, &block)
       options = validate_options(options)
       mailbox = options[:mailbox]
-      batch_size = options.delete(:batch_size) || 100
+      batch_size = options.delete(:batch_size) || 5000
 
       start do |imap|
         imap.examine(mailbox)
         validity = imap.responses["UIDVALIDITY"].first
+        #next_uid = imap.responses["UIDNEXT"].first
         uids = imap.uid_search(options[:keys])
 
         if block_given?
@@ -250,15 +257,44 @@ module Mail
       end
     end
 
-
     # Find each email entry in a mailbox using find_entries_in_batches.
     #
     # Possible options:
+    #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
+    #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
+    #           The default is 'ALL'
+    #   uids:   uid search criteria that is merged with keys and passed to the SEARCH command.  Can be given as a range, array
+    #           or string.
     #   batch_size: size of batches used
     #
     def find_each_entry(options={}, &block)
       find_entries_in_batches(options) do |entries|
         entries.each { |entry| yield entry }
+      end
+    end
+
+    # Find email entries in a mailbox.
+    #
+    # Possible options:
+    #   mailbox: mailbox to search the email(s) in. The default is 'INBOX'.
+    #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
+    #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
+    #           The default is 'ALL'
+    #   uids:   uid search criteria that is merged with keys and passed to the SEARCH command.  Can be given as a range, array
+    #           or string.
+    #   batch_size: size of batches used
+    #
+    def find_entries(options = {}, &block)
+      if block_given?
+        find_each_entry(options) do |entry|
+          yield entry
+        end
+      else
+        results = []
+        find_entries_in_batches(options) do |entries|
+          results += entries
+        end
+        results.size == 1 ? results.first : results
       end
     end
 
@@ -295,12 +331,33 @@ module Mail
         options[:what]    ||= :first
         options[:keys]    ||= 'ALL'
         options[:uid]     ||= nil
+        options[:uids]     ||= nil
         options[:delete_after_find] ||= false
         options[:mailbox] = Net::IMAP.encode_utf7(options[:mailbox])
         options[:read_only] ||= false
         options[:subscribed] ||= false
-
+        options[:keys] = build_keys(options[:uid] || options[:uids]) if options[:uid] || options[:uids]
         options
+      end
+
+      # Build search keys from uids
+      #
+      def build_keys(uids)
+        if uids.is_a?(Numeric)
+          "UID #{uids}"
+        elsif uids.is_a?(Array)
+          "UID #{uids.join(',')}"
+        elsif uids.is_a?(Range)
+          "UID #{Array(uids).join(',')}"
+        elsif uids.is_a?(Hash)
+          "UID #{uids[:from] ? uids[:from] : 1}:#{uids[:to] ? uids[:to] : '*'}"
+        elsif uids.is_a?(String)
+          uids.downcase == 'all' ? 'ALL' : "UID #{uids}"
+        elsif uids.is_a?(Symbol)
+          uids.to_s.downcase == 'all' ? 'ALL' : ''
+        else
+          ""
+        end
       end
 
       # Start an IMAP session and ensures that it will be closed in any case.

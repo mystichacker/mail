@@ -1,7 +1,8 @@
 # encoding: utf-8
 module Mail
   
-  # Represents a message entry.
+  # Represents a message entry containing minimum information to uniquely identify
+  # the corresponding message.
   # 
   class Entry
     include Patterns
