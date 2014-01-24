@@ -147,6 +147,33 @@ module Mail
       end
     end
 
+    # Find batches of email entries in a mailbox.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #
+    def find_entries_in_batches(options={}, &block)
+      options = validate_options(options)
+
+      start do |pop3|
+        if block_given?
+          yield nil
+        end
+      end
+    end
+
+
+    # Find each email entry in a mailbox using find_entries_in_batches.
+    #
+    # Possible options:
+    #   batch_size: size of batches used
+    #
+    def find_each_entry(options={}, &block)
+      find_entries_in_batches(options) do |entries|
+        entries.each { |entry| yield entry }
+      end
+    end
+
     # Delete all emails from a POP3 server
     def delete_all
       start do |pop3|

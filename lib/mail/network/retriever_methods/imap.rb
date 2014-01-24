@@ -218,6 +218,50 @@ module Mail
       end
     end
 
+    # Find batches of email entries in a mailbox.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #
+    def find_entries_in_batches(options={}, &block)
+      options = validate_options(options)
+      mailbox = options[:mailbox]
+      batch_size = options.delete(:batch_size) || 100
+
+      start do |imap|
+        imap.examine(mailbox)
+        validity = imap.responses["UIDVALIDITY"].first
+        uids = imap.uid_search(options[:keys])
+
+        if block_given?
+          uids.each_slice(batch_size) do |batch|
+            results = []
+            imap.uid_fetch(batch, "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)] FLAGS)").each do |data|
+              uid = data.attr['UID'].to_i
+              size = data.attr['RFC822.SIZE'].to_i
+              date = Time.parse(data.attr['INTERNALDATE'])
+              data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'] =~ /.*<(.*)>.*/ ; message_id = $1
+              flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
+              results << Entry.new(mailbox, validity, uid, size, date, message_id, flags)
+            end
+            yield results
+          end
+        end
+      end
+    end
+
+
+    # Find each email entry in a mailbox using find_entries_in_batches.
+    #
+    # Possible options:
+    #   batch_size: size of batches used
+    #
+    def find_each_entry(options={}, &block)
+      find_entries_in_batches(options) do |entries|
+        entries.each { |entry| yield entry }
+      end
+    end
+
     # Delete all emails from a IMAP mailbox
     def delete_all(mailbox='INBOX')
       mailbox ||= 'INBOX'
