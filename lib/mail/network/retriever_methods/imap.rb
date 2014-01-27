@@ -61,6 +61,7 @@ module Mail
     #
     def find_folders(options={}, &block)
       options[:mailbox] ||= ''
+      options[:count] ||= :all
       options = validate_options(options)
       mailbox = options[:mailbox] || ''
       mailbox = Net::IMAP.encode_utf7(mailbox)
@@ -69,10 +70,7 @@ module Mail
       start do |imap|
 
         boxes = options[:subscribed] ? imap.lsub('', mailbox) : imap.list('', mailbox)
-        boxes.reverse! if options[:what].to_sym == :last
-        boxes = boxes.first(options[:count]) if options[:count].is_a?(Integer)
-        boxes.reverse! if (options[:what].to_sym == :last && options[:order].to_sym == :asc) ||
-            (options[:what].to_sym != :last && options[:order].to_sym == :desc)
+        boxes.replace(options[:what].to_sym == :last ? boxes.last(options[:count]) : boxes.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           boxes.each do |box|
@@ -116,17 +114,14 @@ module Mail
     #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
     #           The default is 'ALL'
     #
-    def find(options={}, &block)
+    def find2(options={}, &block)
       options = validate_options(options)
 
       start do |imap|
         options[:read_only] ? imap.examine(options[:mailbox]) : imap.select(options[:mailbox])
 
         uids = imap.uid_search(options[:keys])
-        uids.reverse! if options[:what].to_sym == :last
-        uids = uids.first(options[:count]) if options[:count].is_a?(Integer)
-        uids.reverse! if (options[:what].to_sym == :last && options[:order].to_sym == :asc) ||
-                                (options[:what].to_sym != :last && options[:order].to_sym == :desc)
+        uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           uids.each do |uid|
@@ -174,6 +169,7 @@ module Mail
     #   batch_size: size of batches returned
     #
     def find_in_batches(options={}, &block)
+      options[:count] ||= :all
       options = validate_options(options)
       batch_size = options.delete(:batch_size) || 100
 
@@ -181,16 +177,17 @@ module Mail
         options[:read_only] ? imap.examine(options[:mailbox]) : imap.select(options[:mailbox])
 
         uids = imap.uid_search(options[:keys])
+        uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           uids.each_slice(batch_size) do |batch|
-            emails = []
+            results = []
             batch.each do |uid|
               fetchdata = imap.uid_fetch(uid, ['RFC822'])[0]
-              emails << Mail.new(fetchdata.attr['RFC822'])
+              results << Mail.new(fetchdata.attr['RFC822'])
               imap.uid_store(uid, "+FLAGS", [Net::IMAP::DELETED]) if options[:delete_after_find]
             end
-            yield emails
+            yield results
           end
           imap.expunge if options[:delete_after_find]
         end
@@ -218,6 +215,21 @@ module Mail
       end
     end
 
+    def find(options = {}, &block)
+      if block_given?
+        find_each(options) do |message|
+          yield message
+        end
+      else
+        results = []
+        find_in_batches(options) do |messages|
+          results += messages
+        end
+        results.reverse! if options[:order].to_sym == :desc
+        results.size == 1 && options[:count] == 1 ? results.first : results
+      end
+    end
+
     # Find batches of email entries in a mailbox.
     #
     # Possible options:
@@ -230,6 +242,7 @@ module Mail
     #   batch_size: size of batches returned
     #
     def find_entries_in_batches(options={}, &block)
+      options[:count] ||= :all
       options = validate_options(options)
       mailbox = options[:mailbox]
       batch_size = options.delete(:batch_size) || 5000
@@ -237,8 +250,8 @@ module Mail
       start do |imap|
         imap.examine(mailbox)
         validity = imap.responses["UIDVALIDITY"].first
-        #next_uid = imap.responses["UIDNEXT"].first
         uids = imap.uid_search(options[:keys])
+        uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           uids.each_slice(batch_size) do |batch|
@@ -247,7 +260,7 @@ module Mail
               uid = data.attr['UID'].to_i
               size = data.attr['RFC822.SIZE'].to_i
               date = Time.parse(data.attr['INTERNALDATE'])
-              data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'] =~ /.*<(.*)>.*/ ; message_id = $1
+              message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
               results << Entry.new(mailbox, validity, uid, size, date, message_id, flags)
             end
@@ -294,7 +307,8 @@ module Mail
         find_entries_in_batches(options) do |entries|
           results += entries
         end
-        results.size == 1 ? results.first : results
+        results.reverse! if options[:order].to_sym == :desc
+        results.size == 1 && options[:count] == 1 ? results.first : results
       end
     end
 
@@ -322,63 +336,64 @@ module Mail
 
     private
 
-      # Set default options
-      def validate_options(options)
-        options ||= {}
-        options[:mailbox] ||= 'INBOX'
-        options[:count]   ||= 10
-        options[:order]   ||= :asc
-        options[:what]    ||= :first
-        options[:keys]    ||= 'ALL'
-        options[:uid]     ||= nil
-        options[:uids]     ||= nil
-        options[:delete_after_find] ||= false
-        options[:mailbox] = Net::IMAP.encode_utf7(options[:mailbox])
-        options[:read_only] ||= false
-        options[:subscribed] ||= false
-        options[:keys] = build_keys(options[:uid] || options[:uids]) if options[:uid] || options[:uids]
-        options
+    # Set default options
+    def validate_options(options)
+      options ||= {}
+      options[:mailbox] ||= 'INBOX'
+      options[:count]   ||= 10
+      options[:order]   ||= :asc
+      options[:what]    ||= :first
+      options[:keys]    ||= 'ALL'
+      options[:uid]     ||= nil
+      options[:uids]     ||= nil
+      options[:delete_after_find] ||= false
+      options[:mailbox] = Net::IMAP.encode_utf7(options[:mailbox])
+      options[:read_only] ||= false
+      options[:subscribed] ||= false
+      options[:keys] = build_keys(options[:uid] || options[:uids]) if options[:uid] || options[:uids]
+      options
+    end
+
+    # Build search keys from uids
+    #
+    def build_keys(uids)
+      if uids.is_a?(Numeric)
+        "UID #{uids}"
+      elsif uids.is_a?(Array)
+        "UID #{uids.join(',')}"
+      elsif uids.is_a?(Range)
+        "UID #{Array(uids).join(',')}"
+      elsif uids.is_a?(Hash)
+        "UID #{uids[:from] ? uids[:from] : 1}:#{uids[:to] ? uids[:to] : '*'}"
+      elsif uids.is_a?(String)
+        uids.downcase == 'all' ? 'ALL' : "UID #{uids}"
+      elsif uids.is_a?(Symbol)
+        uids.to_s.downcase == 'all' ? 'ALL' : ''
+      else
+        ""
+      end
+    end
+
+
+    # Start an IMAP session and ensures that it will be closed in any case.
+    def start(config=Mail::Configuration.instance, &block)
+      raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
+
+      imap = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
+      if settings[:authentication].nil?
+        imap.login(settings[:user_name], settings[:password])
+      else
+        # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
+        # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
+        imap.authenticate(settings[:authentication], settings[:user_name], settings[:password])
       end
 
-      # Build search keys from uids
-      #
-      def build_keys(uids)
-        if uids.is_a?(Numeric)
-          "UID #{uids}"
-        elsif uids.is_a?(Array)
-          "UID #{uids.join(',')}"
-        elsif uids.is_a?(Range)
-          "UID #{Array(uids).join(',')}"
-        elsif uids.is_a?(Hash)
-          "UID #{uids[:from] ? uids[:from] : 1}:#{uids[:to] ? uids[:to] : '*'}"
-        elsif uids.is_a?(String)
-          uids.downcase == 'all' ? 'ALL' : "UID #{uids}"
-        elsif uids.is_a?(Symbol)
-          uids.to_s.downcase == 'all' ? 'ALL' : ''
-        else
-          ""
-        end
+      yield imap
+    ensure
+      if defined?(imap) && imap && !imap.disconnected?
+        imap.disconnect
       end
-
-      # Start an IMAP session and ensures that it will be closed in any case.
-      def start(config=Mail::Configuration.instance, &block)
-        raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
-
-        imap = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
-        if settings[:authentication].nil?
-          imap.login(settings[:user_name], settings[:password])
-        else
-          # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
-          # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
-          imap.authenticate(settings[:authentication], settings[:user_name], settings[:password])
-        end
-
-        yield imap
-      ensure
-        if defined?(imap) && imap && !imap.disconnected?
-          imap.disconnect
-        end
-      end
+    end
 
   end
 end
