@@ -96,63 +96,6 @@ module Mail
       end
     end
 
-    # Find emails in a IMAP mailbox. Without any options, the 10 last received emails are returned.
-    #
-    # Possible options:
-    #   mailbox: mailbox to search the email(s) in. The default is 'INBOX'.
-    #   what:    last or first emails. The default is :first.
-    #   order:   order of emails returned. Possible values are :asc or :desc. Default value is :asc.
-    #   count:   number of emails to retrieve. The default value is 10. A value of 1 returns an
-    #            instance of Message, not an array of Message instances.
-    #   read_only: will ensure that no writes are made to the inbox during the session.  Specifically, if this is
-    #              set to true, the code will use the EXAMINE command to retrieve the mail.  If set to false, which
-    #              is the default, a SELECT command will be used to retrieve the mail
-    #              This is helpful when you don't want your messages to be set to read automatically. Default is false.
-    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
-    #           is false. Use #find_and_delete if you would like this to default to true.
-    #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string, 
-    #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
-    #           The default is 'ALL'
-    #
-    def find2(options={}, &block)
-      options = validate_options(options)
-
-      start do |imap|
-        options[:read_only] ? imap.examine(options[:mailbox]) : imap.select(options[:mailbox])
-
-        uids = imap.uid_search(options[:keys])
-        uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
-
-        if block_given?
-          uids.each do |uid|
-            uid = options[:uid].to_i unless options[:uid].nil?
-            fetchdata = imap.uid_fetch(uid, ['RFC822'])[0]
-            new_message = Mail.new(fetchdata.attr['RFC822'])
-            new_message.mark_for_delete = true if options[:delete_after_find]
-            if block.arity == 3
-              yield new_message, imap, uid
-            else
-              yield new_message
-            end
-            imap.uid_store(uid, "+FLAGS", [Net::IMAP::DELETED]) if options[:delete_after_find] && new_message.is_marked_for_delete?
-            break unless options[:uid].nil?
-          end
-          imap.expunge if options[:delete_after_find]
-        else
-          emails = []
-          uids.each do |uid|
-            uid = options[:uid].to_i unless options[:uid].nil?
-            fetchdata = imap.uid_fetch(uid, ['RFC822'])[0]
-            emails << Mail.new(fetchdata.attr['RFC822'])
-            imap.uid_store(uid, "+FLAGS", [Net::IMAP::DELETED]) if options[:delete_after_find]
-            break unless options[:uid].nil?
-          end
-          imap.expunge if options[:delete_after_find]
-          emails.size == 1 && options[:count] == 1 ? emails.first : emails
-        end
-      end
-    end
-
     # Find batches of emails in a IMAP mailbox. Without any options, all emails are returned in batches of 100.
     #
     # Possible options:
@@ -171,22 +114,28 @@ module Mail
     def find_in_batches(options={}, &block)
       options[:count] ||= :all
       options = validate_options(options)
-      batch_size = options.delete(:batch_size) || 100
+      mailbox = options[:mailbox]
+      batch_size = options.delete(:batch_size) || 10
 
       start do |imap|
         options[:read_only] ? imap.examine(options[:mailbox]) : imap.select(options[:mailbox])
 
+        validity = imap.responses["UIDVALIDITY"].first
         uids = imap.uid_search(options[:keys])
         uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           uids.each_slice(batch_size) do |batch|
             results = []
-            batch.each do |uid|
-              fetchdata = imap.uid_fetch(uid, ['RFC822'])[0]
-              results << Mail.new(fetchdata.attr['RFC822'])
-              imap.uid_store(uid, "+FLAGS", [Net::IMAP::DELETED]) if options[:delete_after_find]
+            imap.uid_fetch(batch, "(UID FLAGS RFC822.SIZE INTERNALDATE RFC822)").each do |data|
+              uid = data.attr['UID'].to_i
+              flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
+              message_size = data.attr['RFC822.SIZE'].to_i
+              message_date = Time.parse(data.attr['INTERNALDATE'])
+              rfc822 = data.attr['RFC822']
+              results << Message.new(rfc822,{folder: mailbox, validity: validity, uid: uid, flags: flags, message_size: message_size, message_date: message_date})
             end
+            imap.uid_store(batch, "+FLAGS", [Net::IMAP::DELETED]) if options[:delete_after_find]
             yield results
           end
           imap.expunge if options[:delete_after_find]
@@ -256,13 +205,13 @@ module Mail
         if block_given?
           uids.each_slice(batch_size) do |batch|
             results = []
-            imap.uid_fetch(batch, "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)] FLAGS)").each do |data|
+            imap.uid_fetch(batch, "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])").each do |data|
               uid = data.attr['UID'].to_i
-              size = data.attr['RFC822.SIZE'].to_i
-              date = Time.parse(data.attr['INTERNALDATE'])
-              message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
-              results << Entry.new(mailbox, validity, uid, size, date, message_id, flags)
+              message_size = data.attr['RFC822.SIZE'].to_i
+              message_date = Time.parse(data.attr['INTERNALDATE'])
+              message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
+              results << Entry.new(folder: mailbox, validity: validity, uid: uid, flags: flags, message_size: message_size, message_date: message_date, message_id: message_id)
             end
             yield results
           end
