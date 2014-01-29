@@ -129,11 +129,12 @@ module Mail
         if block_given?
           uids.each_slice(batch_size) do |batch|
             results = []
-            imap.uid_fetch(batch, "(UID FLAGS RFC822.SIZE INTERNALDATE RFC822)").each do |data|
+            imap.uid_fetch(batch, "(UID FLAGS RFC822.SIZE INTERNALDATE RFC822 BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])").each do |data|
               uid = data.attr['UID'].to_i
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
               message_size = data.attr['RFC822.SIZE'].to_i
               message_date = Time.parse(data.attr['INTERNALDATE'])
+              all, message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
               rfc822 = data.attr['RFC822']
               results << Message.new(rfc822,{folder: mailbox, validity: validity, uid: uid, flags: flags, message_size: message_size, message_date: message_date})
             end
@@ -231,7 +232,7 @@ module Mail
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
               message_size = data.attr['RFC822.SIZE'].to_i
               message_date = Time.parse(data.attr['INTERNALDATE'])
-              message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
+              all, message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
               results << Entry.new(folder: mailbox, validity: validity, uid: uid, flags: flags, message_size: message_size, message_date: message_date, message_id: message_id)
             end
             yield results

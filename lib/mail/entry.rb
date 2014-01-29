@@ -26,9 +26,9 @@ module Mail
       "#{folder}.#{validity}.#{uid}: #{sha}"
     end
 
-    # Returns a message sha that can be used to identify a message
+    # Returns a sha that can be used to identify the message
     #
-    def sha
+    def message_sha
       Digest::SHA2.hexdigest "#{message_size}#{message_date}#{message_id}"
     end
 
