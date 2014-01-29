@@ -109,6 +109,8 @@ module Mail
     #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
     #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
     #           The default is 'ALL'
+    #   uids:   uid search criteria that is merged with keys and passed to the SEARCH command.  Can be given as a range, array
+    #           or string.
     #   batch_size: size of batches returned
     #
     def find_in_batches(options={}, &block)
@@ -156,6 +158,8 @@ module Mail
     #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
     #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
     #           The default is 'ALL'
+    #   uids:   uid search criteria that is merged with keys and passed to the SEARCH command.  Can be given as a range, array
+    #           or string.
     #   batch_size: size of batches returned
     #
     def find_each(options = {})
@@ -164,6 +168,23 @@ module Mail
       end
     end
 
+    # Find emails in a IMAP mailbox.
+    #
+    # Possible options:
+    #   mailbox: mailbox to search the email(s) in. The default is 'INBOX'.
+    #   read_only: will ensure that no writes are made to the inbox during the session.  Specifically, if this is
+    #              set to true, the code will use the EXAMINE command to retrieve the mail.  If set to false, which
+    #              is the default, a SELECT command will be used to retrieve the mail
+    #              This is helpful when you don't want your messages to be set to read automatically. Default is false.
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
+    #           is false. Use #find_and_delete if you would like this to default to true.
+    #   keys:   are passed as criteria to the SEARCH command.  They can either be a string holding the entire search string,
+    #           or a single-dimension array of search keywords and arguments.  Refer to  [IMAP] section 6.4.4 for a full list
+    #           The default is 'ALL'
+    #   uids:   uid search criteria that is merged with keys and passed to the SEARCH command.  Can be given as a range, array
+    #           or string.
+    #   batch_size: size of batches returned
+    #
     def find(options = {}, &block)
       if block_given?
         find_each(options) do |message|
