@@ -45,6 +45,7 @@ module Mail
                         :password             => nil,
                         :authentication       => nil,
                         :enable_ssl           => false }.merge!(values)
+      @connection = nil
     end
 
     attr_accessor :settings
@@ -349,22 +350,32 @@ module Mail
     # Start an IMAP session and ensures that it will be closed in any case.
     def start(config=Mail::Configuration.instance, &block)
       raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
-
-      imap = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
-      if settings[:authentication].nil?
-        imap.login(settings[:user_name], settings[:password])
+      if @connection
+        puts "** already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
+        yield @connection
       else
-        # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
-        # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
-        imap.authenticate(settings[:authentication], settings[:user_name], settings[:password])
-      end
-
-      yield imap
-    ensure
-      if defined?(imap) && imap && !imap.disconnected?
-        imap.disconnect
+        begin
+          puts "** connect to IMAP server #{settings[:address]}:#{settings[:port]}"
+          @connection = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
+          if settings[:authentication].nil?
+            puts "** login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+            @connection.login(settings[:user_name], settings[:password])
+          else
+            # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
+            # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
+            puts "** authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+            @connection.authenticate(settings[:authentication], settings[:user_name], settings[:password])
+          end
+          yield @connection
+        ensure
+          if defined?(@connection) && @connection && !@connection.disconnected?
+            puts "** disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
+            @connection.disconnect
+          end
+          @connection = nil
+        end
       end
     end
 
-  end
-end
+  end # IMAP
+end # Mail

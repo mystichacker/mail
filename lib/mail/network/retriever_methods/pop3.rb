@@ -41,6 +41,7 @@ module Mail
                         :password             => nil,
                         :authentication       => nil,
                         :enable_ssl           => false }.merge!(values)
+      @connection = nil
     end
     
     attr_accessor :settings
@@ -210,17 +211,27 @@ module Mail
     # will be deleted when the session is closed.
     def start(config = Configuration.instance, &block)
       raise ArgumentError.new("Mail::Retrievable#pop3_start takes a block") unless block_given?
-    
-      pop3 = Net::POP3.new(settings[:address], settings[:port], false)
-      pop3.enable_ssl(OpenSSL::SSL::VERIFY_NONE) if settings[:enable_ssl]
-      pop3.start(settings[:user_name], settings[:password])
-    
-      yield pop3
-    ensure
-      if defined?(pop3) && pop3 && pop3.started?
-        pop3.finish
+      if @connection
+        puts "** already connected to POP3 server #{settings[:address]}:#{settings[:port]}"
+        yield @connection
+      else
+        begin
+          puts "** connect to POP server #{settings[:address]}:#{settings[:port]}"
+          @connection = Net::POP3.new(settings[:address], settings[:port], false)
+          @connection.enable_ssl(OpenSSL::SSL::VERIFY_NONE) if settings[:enable_ssl]
+          puts "** start on POP3 server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+          @connection.start(settings[:user_name], settings[:password])
+
+          yield @connection
+        ensure
+          if defined?(@connection) && @connection && @connection.started?
+            puts "** disconnect from POP server #{settings[:address]}:#{settings[:port]}"
+            @connection.finish
+          end
+          @connection = nil
+        end
       end
     end
 
-  end
-end
+  end # POP3
+end # Mail
