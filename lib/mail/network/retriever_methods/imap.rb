@@ -59,14 +59,23 @@ module Mail
     #   count:   number of emails to retrieve. The default value is 10. A value of 1 returns an
     #            instance of Message, not an array of Message instances.
     #   subscribed: flag for whether to find subscribed folders only. Default is false
+    #   include: include name search criteria. They can be a string interpreted using file-like glob patterns,
+    #          a regex pattern, or a single-dimension array containing glob strings or regex patterns.
+    #          The default is '*'
+    #   exclude: exclude name search criteria. They can be a string interpreted using file-like glob patterns,
+    #            a regex pattern, or a single-dimension array containing glob strings or regex patterns.
+    #            The default is [/^\[Gmail\]\/*/]
     #
     def find_folders(options={}, &block)
       options[:mailbox] ||= ''
       options[:count] ||= :all
+
       options = validate_options(options)
       mailbox = options[:mailbox] || ''
       mailbox = Net::IMAP.encode_utf7(mailbox)
       mailbox = mailbox.empty? ? '*' : "#{mailbox}/*"
+      include = options[:include] ||= '*'
+      exclude = options[:exclude] ||= [/^\[Gmail\]\/*/]
 
       start do |imap|
 
@@ -76,8 +85,8 @@ module Mail
         if block_given?
           boxes.each do |box|
             name = Net::IMAP.decode_utf7(box.name)
-            next if name =~ /^\[Gmail\]\/*/
-            name = 'INBOX' if name.downcase == 'inbox'
+            next if match_folder(name, exclude)
+            next unless match_folder(name, include)
             flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
             status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
             yield Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
@@ -86,8 +95,8 @@ module Mail
           folders = []
           boxes.each do |box|
             name = Net::IMAP.decode_utf7(box.name)
-            next if name =~ /^\[Gmail\]\/*/
-            name = 'INBOX' if name.downcase == 'inbox'
+            next if match_folder(name, exclude)
+            next unless match_folder(name, include)
             flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
             status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
             folders << Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
@@ -324,6 +333,22 @@ module Mail
       options[:subscribed] ||= false
       options[:keys] = build_keys(options[:uid] || options[:uids]) if options[:uid] || options[:uids]
       options
+    end
+
+
+    # Match name against one or more patterns which can be a string interpreted using file-like glob patterns,
+    # a regex pattern, or a single-dimension array containing glob strings or regex patterns.
+    # The default is '*'
+    def match_folder(name, patterns = '*')
+      Array(patterns).any? do |pattern|
+        if pattern.is_a?(String)
+          File.fnmatch(pattern.downcase, name.downcase)
+        elsif pattern.is_a?(Regexp)
+          name =~ pattern
+        else
+          nil
+        end
+      end
     end
 
     # Build search keys from uids
