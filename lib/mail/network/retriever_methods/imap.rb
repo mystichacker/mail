@@ -47,6 +47,7 @@ module Mail
                         :enable_ssl           => false,
                         :max_retries         => 3}.merge!(values)
       @connection = nil
+      @level = 0
     end
 
     attr_accessor :settings
@@ -54,11 +55,11 @@ module Mail
     # Find folders in a IMAP mailbox. Without any options, the 10 last folders are returned.
     #
     # Possible options:
-    #   mailbox: mailbox to search the folders(s) in. The default is 'INBOX'.
-    #   what:    last or first emails. The default is :first.
-    #   order:   order of emails returned. Possible values are :asc or :desc. Default value is :asc.
-    #   count:   number of emails to retrieve. The default value is 10. A value of 1 returns an
-    #            instance of Message, not an array of Message instances.
+    #   mailbox: mailbox to search the folders(s) in. The default is ''.
+    #   what:    last or first folders. The default is :first.
+    #   order:   order of folders returned. Possible values are :asc or :desc. Default value is :asc.
+    #   count:   number of folders to retrieve. The default value is 10. A value of 1 returns an
+    #            instance of Folder, not an array of Folder instances.
     #   subscribed: flag for whether to find subscribed folders only. Default is false
     #   include: include name search criteria. They can be a string interpreted using file-like glob patterns,
     #          a regex pattern, or a single-dimension array containing glob strings or regex patterns.
@@ -145,7 +146,6 @@ module Mail
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
               message_size = data.attr['RFC822.SIZE'].to_i
               message_date = Time.parse(data.attr['INTERNALDATE'])
-              all, message_id = *(data.attr['BODY[HEADER.FIELDS (MESSAGE-ID)]'].match(/.*<(.*)>.*/))
               rfc822 = data.attr['RFC822']
               results << Message.new(rfc822,{folder: mailbox, validity: validity, uid: uid, flags: flags, message_size: message_size, message_date: message_date})
             end
@@ -403,6 +403,7 @@ module Mail
       connect
       retries = 0
       begin
+        @level += 1
         yield @connection if block_given?
       rescue Errno::ECONNABORTED,
           Errno::ECONNRESET,
@@ -413,6 +414,7 @@ module Mail
           Net::IMAP::ByeResponseError,
           OpenSSL::SSL::SSLError => e
         raise unless (retries += 1) <= settings[:max_retries]
+        #puts "mail(warning): #{e.class.name}: #{e.message} (reconnecting)"
         reset
         sleep 1 * retries
         connect
@@ -421,30 +423,46 @@ module Mail
           Net::IMAP::NoResponseError,
           Net::IMAP::ResponseParseError => e
         raise unless (retries += 1) <= settings[:max_retries]
+        #puts "mail(warning): #{e.class.name}: #{e.message} (retrying)"
         sleep 1 * retries
         retry
+      ensure
+        @level -= 1
+        if @level == 0
+          if defined?(@connection) && @connection && !@connection.disconnected?
+            #puts "mail(info): disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
+            @connection.disconnect
+          end
+          @connection = nil
+        end
       end
     #rescue Mail::Error => e
     #  raise
     rescue Net::IMAP::Error => e
       raise Error, "#{e.class.name}: #{e.message} (giving up)"
     rescue => e
-      raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
+      raise Error, "#{e.class.name}: #{e.message} (cannot recover)"
     end
 
     # Connect (if not already connected).
     # Will attempt to reconnect if necessary.
     #
     def connect
-      return if @connection
+      if @connection
+        #puts "mail[info]: already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
+        return
+      end
       retries = 0
       begin
+        #puts "mail[info]: connect to IMAP server #{settings[:address]}:#{settings[:port]}"
         @connection = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
         if settings[:authentication].nil?
+          #puts "mail[info]: login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.login(settings[:user_name], settings[:password])
         else
           # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
           # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
+          #puts "mail[info]: authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.authenticate(settings[:authentication], settings[:user_name], settings[:password])
         end
       rescue Errno::ECONNRESET,
@@ -456,12 +474,13 @@ module Mail
         # Special check to ensure that we don't retry on OpenSSL certificate
         # verification errors.
         raise if e.is_a?(OpenSSL::SSL::SSLError) && e.message =~ /certificate verify failed/
+        #puts "mail[warning]: #{e.class.name}: #{e.message} (retrying)"
         reset
         sleep 1 * retries
         retry
       end
     rescue => e
-      raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
+      raise Error, "#{e.class.name}: #{e.message} (cannot recover)"
     end
 
     # Resets the connection.
