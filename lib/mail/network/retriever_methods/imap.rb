@@ -372,37 +372,30 @@ module Mail
       end
     end
 
-
     # Start an IMAP session and ensures that it will be closed in any case.
 #    def start(config=Mail::Configuration.instance, &block)
 #      raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
 #      if @connection
-#        puts "mail[info]: already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
 #        yield @connection
 #      else
 #        begin
-#          puts "mail[info]: connect to IMAP server #{settings[:address]}:#{settings[:port]}"
 #          @connection = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
 #          if settings[:authentication].nil?
-#            puts "mail[info]: login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
 #            @connection.login(settings[:user_name], settings[:password])
 #          else
 #            # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
 #            # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
-#            puts "mail[info]: authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
 #            @connection.authenticate(settings[:authentication], settings[:user_name], settings[:password])
 #          end
 #          yield @connection
 #        ensure
 #          if defined?(@connection) && @connection && !@connection.disconnected?
-#            puts "mail[info]: disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
 #            @connection.disconnect
 #          end
 #          @connection = nil
 #        end
 #      end
 #    end
-
 
     # Start an IMAP session and ensures that it will be closed in any case.
     def start(config=Mail::Configuration.instance, &block)
@@ -420,7 +413,6 @@ module Mail
           Net::IMAP::ByeResponseError,
           OpenSSL::SSL::SSLError => e
         raise unless (retries += 1) <= settings[:max_retries]
-        puts "mail[warning]: #{e.class.name}: #{e.message} (reconnecting)"
         reset
         sleep 1 * retries
         connect
@@ -429,7 +421,6 @@ module Mail
           Net::IMAP::NoResponseError,
           Net::IMAP::ResponseParseError => e
         raise unless (retries += 1) <= settings[:max_retries]
-        puts "mail[warning]: #{e.class.name}: #{e.message} (retrying)"
         sleep 1 * retries
         retry
       end
@@ -445,21 +436,15 @@ module Mail
     # Will attempt to reconnect if necessary.
     #
     def connect
-      if @connection
-        puts "mail[info]: already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
-        return
-      end
+      return if @connection
       retries = 0
       begin
-        puts "mail[info]: connect to IMAP server #{settings[:address]}:#{settings[:port]}"
         @connection = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
         if settings[:authentication].nil?
-          puts "mail[info]: login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.login(settings[:user_name], settings[:password])
         else
           # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
           # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
-          puts "mail[info]: authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.authenticate(settings[:authentication], settings[:user_name], settings[:password])
         end
       rescue Errno::ECONNRESET,
@@ -471,7 +456,6 @@ module Mail
         # Special check to ensure that we don't retry on OpenSSL certificate
         # verification errors.
         raise if e.is_a?(OpenSSL::SSL::SSLError) && e.message =~ /certificate verify failed/
-        puts "mail[warning]: #{e.class.name}: #{e.message} (retrying)"
         reset
         sleep 1 * retries
         retry

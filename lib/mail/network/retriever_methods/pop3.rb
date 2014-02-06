@@ -212,20 +212,16 @@ module Mail
     def start(config = Configuration.instance, &block)
       raise ArgumentError.new("Mail::Retrievable#pop3_start takes a block") unless block_given?
       if @connection
-        puts "** already connected to POP3 server #{settings[:address]}:#{settings[:port]}"
         yield @connection
       else
         begin
-          puts "** connect to POP server #{settings[:address]}:#{settings[:port]}"
           @connection = Net::POP3.new(settings[:address], settings[:port], false)
           @connection.enable_ssl(OpenSSL::SSL::VERIFY_NONE) if settings[:enable_ssl]
-          puts "** start on POP3 server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.start(settings[:user_name], settings[:password])
 
           yield @connection
         ensure
           if defined?(@connection) && @connection && @connection.started?
-            puts "** disconnect from POP server #{settings[:address]}:#{settings[:port]}"
             @connection.finish
           end
           @connection = nil
