@@ -47,7 +47,6 @@ module Mail
                         :enable_ssl           => false,
                         :max_retries         => 3}.merge!(values)
       @connection = nil
-      @level = 0
     end
 
     attr_accessor :settings
@@ -398,93 +397,133 @@ module Mail
 #    end
 
     # Start an IMAP session and ensures that it will be closed in any case.
+    #
     def start(config=Mail::Configuration.instance, &block)
       raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
-      connect
-      retries = 0
-      begin
-        @level += 1
-        yield @connection if block_given?
-      rescue Errno::ECONNABORTED,
-          Errno::ECONNRESET,
-          Errno::ENOTCONN,
-          Errno::EPIPE,
-          Errno::ETIMEDOUT,
-          IOError,
-          Net::IMAP::ByeResponseError,
-          OpenSSL::SSL::SSLError => e
-        raise unless (retries += 1) <= settings[:max_retries]
-        #puts "mail(warning): #{e.class.name}: #{e.message} (reconnecting)"
-        reset
-        sleep 1 * retries
+      puts "mail[info]: start session for IMAP server #{settings[:address]}:#{settings[:port]}"
+      if @connection
+        puts "mail[info]: already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
+        begin
+          puts "mail[info]: yield connection"
+          yield @connection if block_given?
+        rescue Errno::ECONNABORTED,
+            Errno::ECONNRESET,
+            Errno::ENOTCONN,
+            Errno::EPIPE,
+            Errno::ETIMEDOUT,
+            IOError,
+            Net::IMAP::ByeResponseError,
+            OpenSSL::SSL::SSLError => e
+          puts "mail(warning): rescue from #{e.class.name}: #{e.message} (continuing)"
+          raise unless (retries += 1) <= settings[:max_retries]
+          puts "mail(warning): #{e.class.name}: #{e.message} (reconnecting)"
+          reset
+          sleep 1 * retries
+          connect
+          retry
+        rescue Net::IMAP::BadResponseError,
+            Net::IMAP::NoResponseError,
+            Net::IMAP::ResponseParseError => e
+          puts "mail(warning): rescue from #{e.class.name}: #{e.message} (continuing)"
+          raise unless (retries += 1) <= settings[:max_retries]
+          puts "mail(warning): #{e.class.name}: #{e.message} (retrying)"
+          sleep 1 * retries
+          retry
+        rescue Net::IMAP::Error => e
+          raise StandardError, "#{e.class.name}: #{e.message} (giving up)"
+        rescue => e
+          raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
+        end
+      else
         connect
-        retry
-      rescue Net::IMAP::BadResponseError,
-          Net::IMAP::NoResponseError,
-          Net::IMAP::ResponseParseError => e
-        raise unless (retries += 1) <= settings[:max_retries]
-        #puts "mail(warning): #{e.class.name}: #{e.message} (retrying)"
-        sleep 1 * retries
-        retry
-      ensure
-        @level -= 1
-        if @level == 0
-          if defined?(@connection) && @connection && !@connection.disconnected?
-            #puts "mail(info): disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
-            @connection.disconnect
-          end
-          @connection = nil
+        retries = 0
+        begin
+          puts "mail[info]: yield connection"
+          yield @connection if block_given?
+        rescue Errno::ECONNABORTED,
+            Errno::ECONNRESET,
+            Errno::ENOTCONN,
+            Errno::EPIPE,
+            Errno::ETIMEDOUT,
+            IOError,
+            Net::IMAP::ByeResponseError,
+            OpenSSL::SSL::SSLError => e
+          puts "mail(warning): rescue from #{e.class.name}: #{e.message} (continuing)"
+          raise unless (retries += 1) <= settings[:max_retries]
+          puts "mail(warning): #{e.class.name}: #{e.message} (reconnecting)"
+          reset
+          sleep 1 * retries
+          connect
+          retry
+        rescue Net::IMAP::BadResponseError,
+            Net::IMAP::NoResponseError,
+            Net::IMAP::ResponseParseError => e
+          puts "mail(warning): rescue from #{e.class.name}: #{e.message} (continuing)"
+          raise unless (retries += 1) <= settings[:max_retries]
+          puts "mail(warning): #{e.class.name}: #{e.message} (retrying)"
+          sleep 1 * retries
+          retry
+        rescue Net::IMAP::Error => e
+          raise StandardError, "#{e.class.name}: #{e.message} (giving up)"
+        rescue => e
+          raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
+        ensure
+          disconnect
         end
       end
-    #rescue Mail::Error => e
-    #  raise
-    rescue Net::IMAP::Error => e
-      raise Error, "#{e.class.name}: #{e.message} (giving up)"
-    rescue => e
-      raise Error, "#{e.class.name}: #{e.message} (cannot recover)"
     end
 
     # Connect (if not already connected).
     # Will attempt to reconnect if necessary.
     #
     def connect
-      if @connection
-        #puts "mail[info]: already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
-        return
-      end
+      return if @connection
       retries = 0
       begin
-        #puts "mail[info]: connect to IMAP server #{settings[:address]}:#{settings[:port]}"
+        puts "mail[info]: connect to IMAP server #{settings[:address]}:#{settings[:port]}"
         @connection = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
         if settings[:authentication].nil?
-          #puts "mail[info]: login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+          puts "mail[info]: login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.login(settings[:user_name], settings[:password])
         else
           # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
           # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
-          #puts "mail[info]: authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+          puts "mail[info]: authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.authenticate(settings[:authentication], settings[:user_name], settings[:password])
         end
       rescue Errno::ECONNRESET,
           Errno::EPIPE,
           Errno::ETIMEDOUT,
           OpenSSL::SSL::SSLError => e
+        puts "mail(warning): rescue from #{e.class.name}: #{e.message} (continuing)"
         raise unless (retries += 1) <= settings[:max_retries]
 
         # Special check to ensure that we don't retry on OpenSSL certificate
         # verification errors.
         raise if e.is_a?(OpenSSL::SSL::SSLError) && e.message =~ /certificate verify failed/
-        #puts "mail[warning]: #{e.class.name}: #{e.message} (retrying)"
+        puts "mail[warning]: #{e.class.name}: #{e.message} (retrying)"
         reset
         sleep 1 * retries
         retry
       end
     rescue => e
-      raise Error, "#{e.class.name}: #{e.message} (cannot recover)"
+      raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
+    end
+
+    # Disconnect
+    #
+    def disconnect
+      if defined?(@connection) && @connection && !@connection.disconnected?
+        puts "mail(info): disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
+        @connection.disconnect
+      end
+      @connection = nil
     end
 
     # Resets the connection.
+    #
     def reset
+      puts "mail[info]: reset connection to IMAP server #{settings[:address]}:#{settings[:port]}"
       @connection = nil
     end
 
