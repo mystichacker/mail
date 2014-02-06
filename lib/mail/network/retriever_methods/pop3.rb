@@ -41,10 +41,29 @@ module Mail
                         :password             => nil,
                         :authentication       => nil,
                         :enable_ssl           => false }.merge!(values)
+      @connection = nil
     end
     
     attr_accessor :settings
-    
+
+    # Find folders in a Pop3 mailbox. Without any options, the 10 last folders are returned.
+    #
+    # Possible options:
+    #   mailbox: mailbox to search the folders(s) in. The default is 'INBOX'.
+    #   what:    last or first emails. The default is :first.
+    #   order:   order of emails returned. Possible values are :asc or :desc. Default value is :asc.
+    #   count:   number of emails to retrieve. The default value is 10. A value of 1 returns an
+    #            instance of Message, not an array of Message instances.
+    #   subscribed: flag for whether to find subscribed folders only. Default is false
+    #
+    def find_folders(options={}, &block)
+      if block_given?
+        yield nil
+      else
+        nil
+      end
+    end
+
     # Find emails in a POP3 mailbox. Without any options, the 5 last received emails are returned.
     #
     # Possible options:
@@ -52,7 +71,7 @@ module Mail
     #   order: order of emails returned. Possible values are :asc or :desc. Default value is :asc.
     #   count: number of emails to retrieve. The default value is 10. A value of 1 returns an
     #          instance of Message, not an array of Message instances.
-    #   delete_after_find: flag for whether to delete each retreived email after find. Default
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
     #           is false. Use #find_and_delete if you would like this to default to true.
     #
     def find(options = {}, &block)
@@ -87,8 +106,76 @@ module Mail
         
       end
     end
-    
-    # Delete all emails from a POP3 server   
+
+    # Find batches of emails in a POP3 mailbox. Without any options, all emails are returned in batches of 100.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
+    #           is false. Use #find_and_delete if you would like this to default to true.
+    #
+    def find_in_batches(options={}, &block)
+      options = validate_options(options)
+      batch_size = options.delete(:batch_size) || 100
+
+      start do |pop3|
+        mails = pop3.mails
+        pop3.reset # Clears all "deleted" marks. This prevents non-explicit/accidental deletions due to server settings.
+
+        if block_given?
+          mails.each_slice(batch_size) do |batch|
+            emails = []
+            batch.each do |mail|
+              emails << Mail.new(mail.pop)
+              mail.delete if options[:delete_after_find]
+            end
+            yield emails
+          end
+        end
+      end
+    end
+
+    # Find each email in a POP3 mailbox using find_in_batches. Without any options,  emails are found in batches of 100.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #   delete_after_find: flag for whether to delete each retrieved email after find. Default
+    #           is false. Use #find_and_delete if you would like this to default to true.
+    #
+    def find_each(options = {})
+      find_in_batches(options) do |messages|
+        messages.each { |messages| yield messages }
+      end
+    end
+
+    # Find batches of email entries in a mailbox.
+    #
+    # Possible options:
+    #   batch_size: size of batches returned
+    #
+    def find_entries_in_batches(options={}, &block)
+      options = validate_options(options)
+
+      start do |pop3|
+        if block_given?
+          yield nil
+        end
+      end
+    end
+
+
+    # Find each email entry in a mailbox using find_entries_in_batches.
+    #
+    # Possible options:
+    #   batch_size: size of batches used
+    #
+    def find_each_entry(options={}, &block)
+      find_entries_in_batches(options) do |entries|
+        entries.each { |entry| yield entry }
+      end
+    end
+
+    # Delete all emails from a POP3 server
     def delete_all
       start do |pop3|
         unless pop3.mails.empty?
@@ -124,17 +211,23 @@ module Mail
     # will be deleted when the session is closed.
     def start(config = Configuration.instance, &block)
       raise ArgumentError.new("Mail::Retrievable#pop3_start takes a block") unless block_given?
-    
-      pop3 = Net::POP3.new(settings[:address], settings[:port], false)
-      pop3.enable_ssl(OpenSSL::SSL::VERIFY_NONE) if settings[:enable_ssl]
-      pop3.start(settings[:user_name], settings[:password])
-    
-      yield pop3
-    ensure
-      if defined?(pop3) && pop3 && pop3.started?
-        pop3.finish
+      if @connection
+        yield @connection
+      else
+        begin
+          @connection = Net::POP3.new(settings[:address], settings[:port], false)
+          @connection.enable_ssl(OpenSSL::SSL::VERIFY_NONE) if settings[:enable_ssl]
+          @connection.start(settings[:user_name], settings[:password])
+
+          yield @connection
+        ensure
+          if defined?(@connection) && @connection && @connection.started?
+            @connection.finish
+          end
+          @connection = nil
+        end
       end
     end
 
-  end
-end
+  end # POP3
+end # Mail

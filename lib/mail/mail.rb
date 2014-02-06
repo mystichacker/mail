@@ -141,13 +141,55 @@ module Mail
     mail
   end
 
+  # Find folders from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.folders(*args, &block)
+    retriever_method.folders(*args, &block)
+  end
+
+  # Find folders from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_folders(*args, &block)
+    retriever_method.find_folders(*args, &block)
+  end
+
   # Find emails from the default retriever
   # See Mail::Retriever for a complete documentation.
   def self.find(*args, &block)
     retriever_method.find(*args, &block)
   end
 
-  # Finds and then deletes retrieved emails from the default retriever
+  # Find batches of emails from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_in_batches(*args, &block)
+    retriever_method.find_in_batches(*args, &block)
+  end
+
+  # Find each email using find_in_batches from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_each(*args, &block)
+    retriever_method.find_each(*args, &block)
+  end
+
+  # Find batches of email entries from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_entries_in_batches(*args, &block)
+    retriever_method.find_entries_in_batches(*args, &block)
+  end
+
+  # Find each email entry using batches from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_each_entry(*args, &block)
+    retriever_method.find_each_entry(*args, &block)
+  end
+
+  # Find email entries from the default retriever
+  # See Mail::Retriever for a complete documentation.
+  def self.find_entries(*args, &block)
+    retriever_method.find_entries(*args, &block)
+  end
+
+# Finds and then deletes retrieved emails from the default retriever
   # See Mail::Retriever for a complete documentation.
   def self.find_and_delete(*args, &block)
     retriever_method.find_and_delete(*args, &block)
@@ -171,7 +213,7 @@ module Mail
     retriever_method.all(*args, &block)
   end
 
-  # Reads in an email message from a path and instantiates it as a new Mail::Message
+# Reads in an email message from a path and instantiates it as a new Mail::Message
   def self.read(filename)
     self.new(File.open(filename, 'rb') { |f| f.read })
   end
