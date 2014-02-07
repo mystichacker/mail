@@ -47,7 +47,6 @@ module Mail
                         :enable_ssl           => false,
                         :max_retries         => 3}.merge!(values)
       @connection = nil
-      @level = 0
     end
 
     attr_accessor :settings
@@ -80,7 +79,9 @@ module Mail
       exclude = options[:exclude] ||= [/^\[Gmail\]\/*/]
 
       start do |imap|
+        info "find_folders bock"
 
+        info "imap.lsub/list #{mailbox}"
         boxes = options[:subscribed] ? imap.lsub('', mailbox) : imap.list('', mailbox)
         boxes.replace(options[:what].to_sym == :last ? boxes.last(options[:count]) : boxes.first(options[:count])) if options[:count].is_a?(Integer)
 
@@ -90,6 +91,7 @@ module Mail
             next if match_folder(name, exclude)
             next unless match_folder(name, include)
             flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
+            info "imap.status #{box.name} #{["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"]}"
             status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
             yield Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
           end unless boxes.nil?
@@ -100,6 +102,7 @@ module Mail
             next if match_folder(name, exclude)
             next unless match_folder(name, include)
             flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
+            info "imap.status #{box.name} #{["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"]}"
             status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
             folders << Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
           end unless boxes.nil?
@@ -132,15 +135,20 @@ module Mail
       batch_size = options.delete(:batch_size) || 10
 
       start do |imap|
+        info "find_in_batches bock"
+        info "imap.examine/select #{options[:mailbox]}"
         options[:read_only] ? imap.examine(options[:mailbox]) : imap.select(options[:mailbox])
 
+        info "imap.responses #{"UIDVALIDITY"}"
         validity = imap.responses["UIDVALIDITY"].first
+        info "imap.uid_search #{options[:keys]}"
         uids = imap.uid_search(options[:keys])
         uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           uids.each_slice(batch_size) do |batch|
             results = []
+            info "imap.uid_fetch #{batch} #{"(UID FLAGS RFC822.SIZE INTERNALDATE RFC822 BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"}"
             imap.uid_fetch(batch, "(UID FLAGS RFC822.SIZE INTERNALDATE RFC822 BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])").each do |data|
               uid = data.attr['UID'].to_i
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
@@ -149,9 +157,11 @@ module Mail
               rfc822 = data.attr['RFC822']
               results << Message.new(rfc822,{folder: mailbox, validity: validity, uid: uid, flags: flags, message_size: message_size, message_date: message_date})
             end
+            info "imap.uid_store #{batch} #{"+FLAGS"} #{[Net::IMAP::DELETED]}" if options[:delete_after_find]
             imap.uid_store(batch, "+FLAGS", [Net::IMAP::DELETED]) if options[:delete_after_find]
             yield results
           end
+          info "imap.expunge" if options[:delete_after_find]
           imap.expunge if options[:delete_after_find]
         end
       end
@@ -230,14 +240,19 @@ module Mail
       batch_size = options.delete(:batch_size) || 5000
 
       start do |imap|
+        info "find_entries_in_batches bock"
+        info "imap.examine #{mailbox}"
         imap.examine(mailbox)
+        info "imap.responses #{"UIDVALIDITY"}"
         validity = imap.responses["UIDVALIDITY"].first
+        info "imap.examine #{options[:keys]}"
         uids = imap.uid_search(options[:keys])
         uids.replace(options[:what].to_sym == :last ? uids.last(options[:count]) : uids.first(options[:count])) if options[:count].is_a?(Integer)
 
         if block_given?
           uids.each_slice(batch_size) do |batch|
             results = []
+            info "imap.uid_fetch #{batch} #{"(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"}"
             imap.uid_fetch(batch, "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])").each do |data|
               uid = data.attr['UID'].to_i
               flags = data.attr['FLAGS'].map {|flag| flag.to_s.downcase.to_sym}
@@ -300,9 +315,13 @@ module Mail
       mailbox = Net::IMAP.encode_utf7(mailbox)
 
       start do |imap|
+        info "delete_all bock"
+        info "imap.uid_search #{batch} #{"ALL"}"
         imap.uid_search(['ALL']).each do |uid|
+          info "imap.uid_store #{uid} #{"+FLAGS"} #{[Net::IMAP::DELETED]}"
           imap.uid_store(uid, "+FLAGS", [Net::IMAP::DELETED])
         end
+        info "imap.expunge"
         imap.expunge
       end
     end
@@ -312,6 +331,7 @@ module Mail
       raise ArgumentError.new('Mail::Retrievable#connection takes a block') unless block_given?
 
       start do |imap|
+        info "connection block"
         yield imap
       end
     end
@@ -398,12 +418,25 @@ module Mail
 #    end
 
     # Start an IMAP session and ensures that it will be closed in any case.
+    #
     def start(config=Mail::Configuration.instance, &block)
       raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
-      connect
+      info "start session for IMAP server #{settings[:address]}:#{settings[:port]}"
+      if @connection
+        info "already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
+        try(&block)
+      else
+        info "need to connect to IMAP server #{settings[:address]}:#{settings[:port]}"
+        connect
+        try(&block)
+        disconnect
+      end
+    end
+
+    def try(&block)
       retries = 0
       begin
-        @level += 1
+        info "try (#{retries}) yield connection"
         yield @connection if block_given?
       rescue Errno::ECONNABORTED,
           Errno::ECONNRESET,
@@ -413,8 +446,9 @@ module Mail
           IOError,
           Net::IMAP::ByeResponseError,
           OpenSSL::SSL::SSLError => e
+        warn "rescue from #{e.class.name}: #{e.message} (continuing)"
         raise unless (retries += 1) <= settings[:max_retries]
-        #puts "mail(warning): #{e.class.name}: #{e.message} (reconnecting)"
+        warn "#{e.class.name}: #{e.message} (reconnecting)"
         reset
         sleep 1 * retries
         connect
@@ -422,70 +456,106 @@ module Mail
       rescue Net::IMAP::BadResponseError,
           Net::IMAP::NoResponseError,
           Net::IMAP::ResponseParseError => e
+        warn "rescue from #{e.class.name}: #{e.message} (continuing)"
         raise unless (retries += 1) <= settings[:max_retries]
-        #puts "mail(warning): #{e.class.name}: #{e.message} (retrying)"
+        warn "#{e.class.name}: #{e.message} (retrying)"
         sleep 1 * retries
         retry
-      ensure
-        @level -= 1
-        if @level == 0
-          if defined?(@connection) && @connection && !@connection.disconnected?
-            #puts "mail(info): disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
-            @connection.disconnect
-          end
-          @connection = nil
-        end
+      rescue Net::IMAP::Error => e
+        raise StandardError, "#{e.class.name}: #{e.message} (giving up)"
+      rescue => e
+        raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
       end
-    #rescue Mail::Error => e
-    #  raise
-    rescue Net::IMAP::Error => e
-      raise Error, "#{e.class.name}: #{e.message} (giving up)"
-    rescue => e
-      raise Error, "#{e.class.name}: #{e.message} (cannot recover)"
     end
 
     # Connect (if not already connected).
     # Will attempt to reconnect if necessary.
     #
     def connect
-      if @connection
-        #puts "mail[info]: already connected to IMAP server #{settings[:address]}:#{settings[:port]}"
-        return
-      end
+      return if @connection
       retries = 0
       begin
-        #puts "mail[info]: connect to IMAP server #{settings[:address]}:#{settings[:port]}"
+        info "connect to IMAP server #{settings[:address]}:#{settings[:port]}"
         @connection = Net::IMAP.new(settings[:address], settings[:port], settings[:enable_ssl], nil, false)
         if settings[:authentication].nil?
-          #puts "mail[info]: login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+          info "login to IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.login(settings[:user_name], settings[:password])
         else
           # Note that Net::IMAP#authenticate('LOGIN', ...) is not equal with Net::IMAP#login(...)!
           # (see also http://www.ensta.fr/~diam/ruby/online/ruby-doc-stdlib/libdoc/net/imap/rdoc/classes/Net/IMAP.html#M000718)
-          #puts "mail[info]: authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
+          info "authenticate on IMAP server as #{settings[:user_name]}/#{settings[:password].gsub(/./, '*')}"
           @connection.authenticate(settings[:authentication], settings[:user_name], settings[:password])
         end
       rescue Errno::ECONNRESET,
           Errno::EPIPE,
           Errno::ETIMEDOUT,
           OpenSSL::SSL::SSLError => e
+        warn "rescue from #{e.class.name}: #{e.message} (continuing)"
         raise unless (retries += 1) <= settings[:max_retries]
 
         # Special check to ensure that we don't retry on OpenSSL certificate
         # verification errors.
         raise if e.is_a?(OpenSSL::SSL::SSLError) && e.message =~ /certificate verify failed/
-        #puts "mail[warning]: #{e.class.name}: #{e.message} (retrying)"
+        warn "#{e.class.name}: #{e.message} (retrying)"
         reset
         sleep 1 * retries
         retry
       end
     rescue => e
-      raise Error, "#{e.class.name}: #{e.message} (cannot recover)"
+      raise StandardError, "#{e.class.name}: #{e.message} (cannot recover)"
+    end
+
+    # Disconnect
+    #
+    def disconnect
+      info "disconnect from IMAP server #{settings[:address]}:#{settings[:port]}"
+      if defined?(@connection) && @connection && !@connection.disconnected?
+        @connection.disconnect
+      end
+      @connection = nil
     end
 
     # Resets the connection.
+    #
     def reset
+      info "reset connection to IMAP server #{settings[:address]}:#{settings[:port]}"
       @connection = nil
+    end
+
+    # Logger
+    # @param [Symbol] level
+    # @param [String] msg
+    # @return [Bool] logged
+    def log(level, msg)
+      return true if ![:fatal, :error, :warn, :info, :debug, :insane].include?(level) || msg.nil? || msg.empty?
+      puts "[mail/#{level}/#{Time.new.strftime('%H:%M:%S')}] #{msg}"
+      true
+    rescue => e
+      false
+    end
+
+    def fatal(msg)
+      log(:fatal, msg)
+    end
+
+    def error(msg)
+      log(:error, msg)
+    end
+
+    def warn(msg)
+      log(:warn, msg)
+    end
+
+    def debug(msg)
+      log(:debug, msg)
+    end
+
+    def info(msg)
+      log(:info, msg)
+    end
+
+    def insane(msg)
+      log(:insane, msg)
     end
 
   end # IMAP
