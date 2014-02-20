@@ -79,7 +79,7 @@ module Mail
       exclude = options[:exclude] ||= [/^\[Gmail\]\/*/]
 
       start do |imap|
-        info "find_folders bock"
+        info "find_folders block"
 
         info "imap.lsub/list #{mailbox}"
         boxes = options[:subscribed] ? imap.lsub('', mailbox) : imap.list('', mailbox)
@@ -135,7 +135,7 @@ module Mail
       batch_size = options.delete(:batch_size) || 10
 
       start do |imap|
-        info "find_in_batches bock"
+        info "find_in_batches block"
         info "imap.examine/select #{options[:mailbox]}"
         options[:read_only] ? imap.examine(options[:mailbox]) : imap.select(options[:mailbox])
 
@@ -240,7 +240,7 @@ module Mail
       batch_size = options.delete(:batch_size) || 5000
 
       start do |imap|
-        info "find_entries_in_batches bock"
+        info "find_entries_in_batches block"
         info "imap.examine #{mailbox}"
         imap.examine(mailbox)
         info "imap.responses #{"UIDVALIDITY"}"
@@ -315,7 +315,7 @@ module Mail
       mailbox = Net::IMAP.encode_utf7(mailbox)
 
       start do |imap|
-        info "delete_all bock"
+        info "delete_all block"
         info "imap.uid_search #{batch} #{"ALL"}"
         imap.uid_search(['ALL']).each do |uid|
           info "imap.uid_store #{uid} #{"+FLAGS"} #{[Net::IMAP::DELETED]}"
