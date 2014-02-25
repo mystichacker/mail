@@ -77,17 +77,18 @@ module Mail
     include Mail::CheckDeliveryParams
 
     def initialize(values)
-      self.settings = { :address              => "localhost",
-                        :port                 => 25,
-                        :domain               => 'localhost.localdomain',
-                        :user_name            => nil,
-                        :password             => nil,
-                        :authentication       => nil,
+      self.settings = { :address => "localhost",
+                        :port => 25,
+                        :domain => 'localhost.localdomain',
+                        :user_name => nil,
+                        :password => nil,
+                        :authentication => nil,
                         :enable_starttls_auto => true,
-                        :openssl_verify_mode  => nil,
-                        :ssl                  => nil,
-                        :tls                  => nil
-                      }.merge!(values)
+                        :openssl_verify_mode => nil,
+                        :ssl => nil,
+                        :tls => nil
+      }.merge!(values)
+      @connection = nil
     end
 
     attr_accessor :settings
@@ -119,9 +120,45 @@ module Mail
         self
       end
     end
-    
+
+    # Returns the connection object of the retrievable (IMAP or POP3)
+    def connection(&block)
+      raise ArgumentError.new('Mail::Retrievable#connection takes a block') unless block_given?
+
+      start do |smtp|
+        info "connection block"
+        yield smtp
+      end
+    end
 
     private
+
+    def start(config = Mail::Configuration.instance, &block)
+      raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
+      if @connection
+        yield @connection
+      else
+        begin
+          @connection = Net::SMTP.new(settings[:address], settings[:port])
+          if settings[:tls] || settings[:ssl]
+            if @connection.respond_to?(:enable_tls)
+              @connection.enable_tls(ssl_context)
+            end
+          elsif settings[:enable_starttls_auto]
+            if @connection.respond_to?(:enable_starttls_auto)
+              @connection.enable_starttls_auto(ssl_context)
+            end
+          end
+          @connection.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication])
+          yield @connection
+        ensure # closes connection
+          if defined?(@connection) && @connection && @connection.started?
+            @connection.finish
+          end
+          @connection = nil
+        end
+      end
+    end
 
     # Allow SSL context to be configured via settings, for Ruby >= 1.9
     # Just returns openssl verify mode for Ruby 1.8.x

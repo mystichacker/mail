@@ -229,7 +229,11 @@ module Mail
     Mail.new(mail_as_string)
   end
 
-  def Mail.connection(&block)
+  def Mail.delivery_connection(&block)
+    delivery_method.connection(&block)
+  end
+
+  def Mail.retriever_connection(&block)
     retriever_method.connection(&block)
   end
 
