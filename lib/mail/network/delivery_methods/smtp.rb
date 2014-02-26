@@ -121,9 +121,9 @@ module Mail
       end
     end
 
-    # Returns the connection object of the retrievable (IMAP or POP3)
+    # Returns the connection object of the delivery method
     def connection(&block)
-      raise ArgumentError.new('Mail::Retrievable#connection takes a block') unless block_given?
+      raise ArgumentError.new('Mail::Deliverable#connection takes a block') unless block_given?
 
       start do |smtp|
         info "connection block"
@@ -133,8 +133,10 @@ module Mail
 
     private
 
+    # Start an SMTP session and ensures that it will be closed in any case.
+    #
     def start(config = Mail::Configuration.instance, &block)
-      raise ArgumentError.new("Mail::Retrievable#imap_start takes a block") unless block_given?
+      raise ArgumentError.new('Mail::Deliverable#imap_start takes a block') unless block_given?
       if @connection
         yield @connection
       else
