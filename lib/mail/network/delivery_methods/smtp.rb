@@ -25,7 +25,7 @@ module Mail
   #   end
   # 
   # === Sending via GMail
-  # 
+  #
   #   Mail.defaults do
   #     delivery_method :smtp, { :address              => "smtp.gmail.com",
   #                              :port                 => 587,
@@ -108,7 +108,6 @@ module Mail
           smtp.enable_starttls_auto(ssl_context)
         end
       end
-nothing  = { address: "smtp.gmail.com", port: 587, domain: 'smtp.google.com', user_name: 'jquadrin.devtest', password: 'devtest123', authentication: 'plain', enable_starttls_auto: true }
 
       response = nil
       smtp.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication]) do |smtp_obj|
@@ -153,7 +152,7 @@ nothing  = { address: "smtp.gmail.com", port: 587, domain: 'smtp.google.com', us
             end
           end
           info 'start connection'
-          @connection = @connection.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication])
+          @connection.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication])
           info 'connection started'
           yield @connection
         ensure # closes connection
