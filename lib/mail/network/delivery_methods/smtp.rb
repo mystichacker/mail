@@ -108,6 +108,7 @@ module Mail
           smtp.enable_starttls_auto(ssl_context)
         end
       end
+nothing  = { address: "smtp.gmail.com", port: 587, domain: 'smtp.google.com', user_name: 'jquadrin.devtest', password: 'devtest123', authentication: 'plain', enable_starttls_auto: true }
 
       response = nil
       smtp.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication]) do |smtp_obj|
@@ -126,11 +127,10 @@ module Mail
       raise ArgumentError.new('Mail::Deliverable#connection takes a block') unless block_given?
 
       start do |smtp|
-        info "connection block"
+        info 'connection block'
         yield smtp
       end
     end
-
     private
 
     # Start an SMTP session and ensures that it will be closed in any case.
@@ -138,6 +138,7 @@ module Mail
     def start(config = Mail::Configuration.instance, &block)
       raise ArgumentError.new('Mail::Deliverable#imap_start takes a block') unless block_given?
       if @connection
+        info 'connection already open'
         yield @connection
       else
         begin
@@ -151,10 +152,14 @@ module Mail
               @connection.enable_starttls_auto(ssl_context)
             end
           end
-          @connection.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication])
+          info 'start connection'
+          @connection = @connection.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication])
+          info 'connection started'
           yield @connection
         ensure # closes connection
+          info 'close connection block'
           if defined?(@connection) && @connection && @connection.started?
+            info 'close connection'
             @connection.finish
           end
           @connection = nil
@@ -177,5 +182,42 @@ module Mail
       context.ca_file = settings[:ca_file] if settings[:ca_file]
       context
     end
-  end
-end
+
+    # Logger
+    # @param [Symbol] level
+    # @param [String] msg
+    # @return [Bool] logged
+    def log(level, msg)
+      return true if ![:fatal, :error, :warn, :info, :debug, :insane].include?(level) || msg.nil? || msg.empty?
+      puts "[mail/#{level}/#{Time.new.strftime('%H:%M:%S')}] #{msg}"
+      true
+    rescue => e
+      false
+    end
+
+    def fatal(msg)
+      log(:fatal, msg)
+    end
+
+    def error(msg)
+      log(:error, msg)
+    end
+
+    def warn(msg)
+      log(:warn, msg)
+    end
+
+    def debug(msg)
+      log(:debug, msg)
+    end
+
+    def info(msg)
+      log(:info, msg)
+    end
+
+    def insane(msg)
+      log(:insane, msg)
+    end
+
+  end # SMTP
+end # Mail
