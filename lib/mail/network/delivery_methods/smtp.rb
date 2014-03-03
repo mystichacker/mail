@@ -97,21 +97,10 @@ module Mail
     # The from and to attributes are optional. If not set, they are retrieve from the Message.
     def deliver!(mail)
       smtp_from, smtp_to, message = check_delivery_params(mail)
-
-      smtp = Net::SMTP.new(settings[:address], settings[:port])
-      if settings[:tls] || settings[:ssl]
-        if smtp.respond_to?(:enable_tls)
-          smtp.enable_tls(ssl_context)
-        end
-      elsif settings[:enable_starttls_auto]
-        if smtp.respond_to?(:enable_starttls_auto)
-          smtp.enable_starttls_auto(ssl_context)
-        end
-      end
-
-      response = nil
-      smtp.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication]) do |smtp_obj|
-        response = smtp_obj.sendmail(message, smtp_from, smtp_to)
+      start do |smtp|
+        info 'sending message'
+        response = smtp.sendmail(message, smtp_from, smtp_to)
+        info response.inspect
       end
 
       if settings[:return_response]
@@ -120,6 +109,7 @@ module Mail
         self
       end
     end
+    alias_method :deliver, :'deliver!'
 
     # Returns the connection object of the delivery method
     def connection(&block)
@@ -127,7 +117,7 @@ module Mail
 
       start do |smtp|
         info 'connection block'
-        yield smtp
+        yield smtp, self
       end
     end
     private
