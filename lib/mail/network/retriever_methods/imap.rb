@@ -78,18 +78,16 @@ module Mail
       mailbox = Net::IMAP.encode_utf7(mailbox)
       mailbox = mailbox.empty? ? '*' : "#{mailbox}/*"
       include = options[:include] ||= '*'
-      exclude = options[:exclude] ||= [/^\[Gmail\]\/*/]
+      exclude = options[:exclude] ||= nil
       include_flags = options[:include_flags] ||= nil
-      exclude_flags = options[:exclude_flags] ||= :noselect
+      exclude_flags = options[:exclude_flags] ||= [:Noselect, :All, :Drafts, :Important, :Junk, :Flagged, :Trash]
 
       start do |imap|
         info "find_folders block"
-
         info "imap.lsub/list #{mailbox}"
         boxes = options[:subscribed] ? imap.lsub('', mailbox) : imap.list('', mailbox)
         boxes.replace(options[:what].to_sym == :last ? boxes.last(options[:count]) : boxes.first(options[:count])) if options[:count].is_a?(Integer)
-        include_flags = Array(include_flags).map{|f| f.to_s.downcase.to_sym}.compact
-        exclude_flags = Array(exclude_flags).map{|f| f.to_s.downcase.to_sym}.compact
+
         if block_given?
           boxes.each do |box|
             name = Net::IMAP.decode_utf7(box.name)
@@ -380,7 +378,7 @@ module Mail
 
     # Match folder flags (attributes) to an array of symbols to check if they intersect
     def match_folder_flags(flags, symbols)
-      (symbols & flags).any?
+      (flags & Array(symbols).map{|f| f.to_s.downcase.to_sym}.compact).any?
     end
 
     # Build search keys from uids
