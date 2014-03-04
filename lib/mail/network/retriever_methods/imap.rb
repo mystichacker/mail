@@ -77,6 +77,8 @@ module Mail
       mailbox = mailbox.empty? ? '*' : "#{mailbox}/*"
       include = options[:include] ||= '*'
       exclude = options[:exclude] ||= [/^\[Gmail\]\/*/]
+      include_flags = options[:include_flags] ||= nil
+      exclude_flags = options[:exclude_flags] ||= 'noselect'
 
       start do |imap|
         info "find_folders block"
@@ -84,13 +86,14 @@ module Mail
         info "imap.lsub/list #{mailbox}"
         boxes = options[:subscribed] ? imap.lsub('', mailbox) : imap.list('', mailbox)
         boxes.replace(options[:what].to_sym == :last ? boxes.last(options[:count]) : boxes.first(options[:count])) if options[:count].is_a?(Integer)
-
+        include_flags = Array(include_flags).map{|f| f.to_s.downcase.to_sym}.compact
+        exclude_flags = Array(exclude_flags).map{|f| f.to_s.downcase.to_sym}.compact
         if block_given?
           boxes.each do |box|
             name = Net::IMAP.decode_utf7(box.name)
-            next if match_folder(name, exclude)
-            next unless match_folder(name, include)
             flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
+            next if match_folder(name, exclude) || match_folder_flag(flags, exclude_flags)
+            next unless match_folder(name, include) || match_folder_flag(flags, include_flags)
             info "imap.status #{box.name} #{["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"]}"
             status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
             yield Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
@@ -99,9 +102,9 @@ module Mail
           folders = []
           boxes.each do |box|
             name = Net::IMAP.decode_utf7(box.name)
-            next if match_folder(name, exclude)
-            next unless match_folder(name, include)
             flags = box.attr ? box.attr.map{|e| e.to_s.downcase.to_sym} : nil
+            next if match_folder(name, exclude) || match_folder_flag(flags, exclude_flags)
+            next unless match_folder(name, include) || match_folder_flag(flags, include_flags)
             info "imap.status #{box.name} #{["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"]}"
             status = imap.status(box.name, ["MESSAGES", "UNSEEN", "UIDVALIDITY", "UIDNEXT"])
             folders << Folder.new(name, delim: box.delim, flags: flags, messages: status['MESSAGES'], unseen: status['UNSEEN'], validity: status['UIDVALIDITY'], next: status['UIDNEXT'])
@@ -370,6 +373,14 @@ module Mail
           nil
         end
       end
+    end
+
+
+    # Match name against one or more patterns which can be a string interpreted using file-like glob patterns,
+    # a regex pattern, or a single-dimension array containing glob strings or regex patterns.
+    # The default is '*'
+    def match_folder_flags(flags, symbols)
+      (symbols & flags).any?
     end
 
     # Build search keys from uids
