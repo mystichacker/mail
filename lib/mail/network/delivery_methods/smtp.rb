@@ -25,7 +25,7 @@ module Mail
   #   end
   # 
   # === Sending via GMail
-  # 
+  #
   #   Mail.defaults do
   #     delivery_method :smtp, { :address              => "smtp.gmail.com",
   #                              :port                 => 587,
@@ -77,17 +77,18 @@ module Mail
     include Mail::CheckDeliveryParams
 
     def initialize(values)
-      self.settings = { :address              => "localhost",
-                        :port                 => 25,
-                        :domain               => 'localhost.localdomain',
-                        :user_name            => nil,
-                        :password             => nil,
-                        :authentication       => nil,
+      self.settings = { :address => "localhost",
+                        :port => 25,
+                        :domain => 'localhost.localdomain',
+                        :user_name => nil,
+                        :password => nil,
+                        :authentication => nil,
                         :enable_starttls_auto => true,
-                        :openssl_verify_mode  => nil,
-                        :ssl                  => nil,
-                        :tls                  => nil
-                      }.merge!(values)
+                        :openssl_verify_mode => nil,
+                        :ssl => nil,
+                        :tls => nil
+      }.merge!(values)
+      @connection = nil
     end
 
     attr_accessor :settings
@@ -96,21 +97,10 @@ module Mail
     # The from and to attributes are optional. If not set, they are retrieve from the Message.
     def deliver!(mail)
       smtp_from, smtp_to, message = check_delivery_params(mail)
-
-      smtp = Net::SMTP.new(settings[:address], settings[:port])
-      if settings[:tls] || settings[:ssl]
-        if smtp.respond_to?(:enable_tls)
-          smtp.enable_tls(ssl_context)
-        end
-      elsif settings[:enable_starttls_auto]
-        if smtp.respond_to?(:enable_starttls_auto)
-          smtp.enable_starttls_auto(ssl_context)
-        end
-      end
-
-      response = nil
-      smtp.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication]) do |smtp_obj|
-        response = smtp_obj.sendmail(message, smtp_from, smtp_to)
+      start do |smtp|
+        info 'sending message'
+        response = smtp.sendmail(message, smtp_from, smtp_to)
+        info response.inspect
       end
 
       if settings[:return_response]
@@ -119,9 +109,52 @@ module Mail
         self
       end
     end
-    
+    alias_method :deliver, :'deliver!'
 
+    # Returns the connection object of the delivery method
+    def connection(&block)
+      raise ArgumentError.new('Mail::Deliverable#connection takes a block') unless block_given?
+
+      start do |smtp|
+        info 'connection block'
+        yield smtp, self
+      end
+    end
     private
+
+    # Start an SMTP session and ensures that it will be closed in any case.
+    #
+    def start(config = Mail::Configuration.instance, &block)
+      raise ArgumentError.new('Mail::Deliverable#imap_start takes a block') unless block_given?
+      if @connection
+        info 'connection already open'
+        yield @connection
+      else
+        begin
+          @connection = Net::SMTP.new(settings[:address], settings[:port])
+          if settings[:tls] || settings[:ssl]
+            if @connection.respond_to?(:enable_tls)
+              @connection.enable_tls(ssl_context)
+            end
+          elsif settings[:enable_starttls_auto]
+            if @connection.respond_to?(:enable_starttls_auto)
+              @connection.enable_starttls_auto(ssl_context)
+            end
+          end
+          info 'start connection'
+          @connection.start(settings[:domain], settings[:user_name], settings[:password], settings[:authentication])
+          info 'connection started'
+          yield @connection
+        ensure # closes connection
+          info 'close connection block'
+          if defined?(@connection) && @connection && @connection.started?
+            info 'close connection'
+            @connection.finish
+          end
+          @connection = nil
+        end
+      end
+    end
 
     # Allow SSL context to be configured via settings, for Ruby >= 1.9
     # Just returns openssl verify mode for Ruby 1.8.x
@@ -138,5 +171,42 @@ module Mail
       context.ca_file = settings[:ca_file] if settings[:ca_file]
       context
     end
-  end
-end
+
+    # Logger
+    # @param [Symbol] level
+    # @param [String] msg
+    # @return [Bool] logged
+    def log(level, msg)
+      return true if ![:fatal, :error, :warn, :info, :debug, :insane].include?(level) || msg.nil? || msg.empty?
+      puts "[mail/#{level}/#{Time.new.strftime('%H:%M:%S')}] #{msg}"
+      true
+    rescue => e
+      false
+    end
+
+    def fatal(msg)
+      log(:fatal, msg)
+    end
+
+    def error(msg)
+      log(:error, msg)
+    end
+
+    def warn(msg)
+      log(:warn, msg)
+    end
+
+    def debug(msg)
+      log(:debug, msg)
+    end
+
+    def info(msg)
+      log(:info, msg)
+    end
+
+    def insane(msg)
+      log(:insane, msg)
+    end
+
+  end # SMTP
+end # Mail
